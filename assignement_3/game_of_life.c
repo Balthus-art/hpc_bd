@@ -10,7 +10,6 @@
 int *get_nbours(int pid, int m, int n);
 void exchange_ghost_cells(int *matrix, int num_rows, int num_cols, int *neighbours);
 int calculate_number_live_cells(int *matrix, int num_rows, int num_cols);
-// void get_total_live_cells(int *matrix, int num_rows, int num_cols, MPI_Comm comm)
 
 void print_matrix(int *matrix, int rows, int cols, int rank, const char *label) {
   printf("\n[Rank %d] %s:\n", rank, label);
