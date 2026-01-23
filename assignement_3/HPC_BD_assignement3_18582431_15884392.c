@@ -20,7 +20,11 @@
 
 #define  MASTER		0
 #define MATRIX_SIZE 10
-#define niter 3
+#define niter 10
+
+int *get_nbours(int pid, int m, int n);
+void exchange_ghost_cells(int *matrix, int num_rows, int num_cols, int *neighbours);
+int calculate_number_live_cells(int *matrix, int num_rows, int num_cols);
 
 int main (int argc, char *argv[])
 // Main function for the program. `argc` and `argv` handle command-line arguments.
@@ -58,7 +62,8 @@ int main (int argc, char *argv[])
     }
 
     // initialize "subM": the local sub-matrix that each process will update
-    int subM[MATRIX_SIZE/m + 2][MATRIX_SIZE/n + 2] = {};
+    int *subM;
+    subM = (int *)malloc((MATRIX_SIZE/m + 2) * (MATRIX_SIZE/n + 2) * sizeof(int));
 
     // Logic for task with Master rank.
     if (rank == MASTER) {
@@ -66,9 +71,9 @@ int main (int argc, char *argv[])
         #define PATTERN_WIDTH 8
 
         uint8_t pattern[PATTERN_HEIGHT][PATTERN_WIDTH] = {
-            {0, 0, 0, 0, 0, 0, 1, 0},
-            {0, 1, 1, 1, 0, 0, 1, 0},
-            {0, 0, 0, 0, 0, 0, 1, 0},
+            {0, 1, 0, 0, 0, 0, 0, 0},
+            {0, 0, 1, 0, 0, 0, 0, 0},
+            {1, 1, 1, 0, 0, 0, 0, 0},
             {0, 0, 0, 0, 0, 0, 0, 0},
             {0, 0, 0, 0, 0, 0, 0, 0},
             {0, 0, 0, 0, 0, 0, 0, 0},
@@ -103,14 +108,14 @@ int main (int argc, char *argv[])
             {
                 for (j = 0; j < MATRIX_SIZE/n; j++)
                 {
-                    subM[i+1][j+1] = M[(proc/n)*MATRIX_SIZE/m + i][(proc%n)*MATRIX_SIZE/n + j];
+                    subM[(i+1)*(MATRIX_SIZE/n + 2) + (j+1)] = M[(proc/n)*MATRIX_SIZE/m + i][(proc%n)*MATRIX_SIZE/n + j];
                 }
             }
 
             //Send sub-matrix to each process
             if (proc != MASTER)
             {
-                MPI_Isend(&subM[0][0],
+                MPI_Isend(subM,
                         (MATRIX_SIZE/m + 2) * (MATRIX_SIZE/n + 2),
                         MPI_INT,
                         proc,
@@ -123,7 +128,7 @@ int main (int argc, char *argv[])
     // Logic for task with non-Master ranks.
     else if (rank != MASTER) {
         // Receive sub-matrix from master process
-        MPI_Recv(&subM[0][0],
+        MPI_Recv(subM,
          (MATRIX_SIZE/m + 2) * (MATRIX_SIZE/n + 2),
          MPI_INT,
          MASTER,
@@ -134,44 +139,63 @@ int main (int argc, char *argv[])
     
     MPI_Barrier(MPI_COMM_WORLD); // synchronize all processes before printing
 
-    sleep(rank*3);
+    sleep(rank*10);  // TODO: remove
+
+    int *neighbours = get_nbours(rank, m, n);
+
     // print the chunk assigned to each process
     for (iter = 0; iter < niter; iter++)
     {
-        
+        exchange_ghost_cells(subM, MATRIX_SIZE/m+2, MATRIX_SIZE/n+2, neighbours);
+
         printf("Process %d - Iteration %d - Sub-matrix:\n", rank, iter);
         for (i = 0; i < MATRIX_SIZE/m+2; i++)
         {
             for (j = 0; j < MATRIX_SIZE/n+2; j++)
             {
-                printf("%d ", subM[i][j]);
+                printf("%d ", subM[i*(MATRIX_SIZE/n+2) + j]);
             }
             printf("\n");
         }
 
         //update sub-matrix
-        int temp[MATRIX_SIZE/m+2][MATRIX_SIZE/n+2]= {};
+        int *temp = (int *)calloc((MATRIX_SIZE/m+2) * (MATRIX_SIZE/n+2), sizeof(int));
+        int cols = MATRIX_SIZE/n+2;
         for (i = 0; i < MATRIX_SIZE/m; i++)
         {
             for (j = 0; j < MATRIX_SIZE/n; j++)
             {
                 int nsum = 0;
-                nsum = subM[i][j] + subM[i][j+1] + subM[i][j+2] + subM[i+2][j] +
-                    subM[i+2][j+1] + subM[i+2][j+2] + subM[i+1][j] + subM[i+1][j+2];
-                if (subM[i+1][j+1] == 0 && nsum == 3)
+                nsum = subM[i*cols + j] + subM[i*cols + j+1] + subM[i*cols + j+2] + subM[(i+2)*cols + j] +
+                    subM[(i+2)*cols + j+1] + subM[(i+2)*cols + j+2] + subM[(i+1)*cols + j] + subM[(i+1)*cols + j+2];
+                if (subM[(i+1)*cols + j+1] == 0 && nsum == 3)
                 {
-                    temp[i+1][j+1] = 1;
+                    temp[(i+1)*cols + j+1] = 1;
                 }
-                else if (subM[i+1][j+1] == 1 && nsum >= 2 && nsum <= 3)
+                else if (subM[(i+1)*cols + j+1] == 1 && nsum >= 2 && nsum <= 3)
                 {
-                    temp[i+1][j+1] = 1;
+                    temp[(i+1)*cols + j+1] = 1;
                 }
             }
         }
         memcpy(subM, temp, sizeof(int) * (MATRIX_SIZE/m + 2) * (MATRIX_SIZE/n + 2));
+        free(temp);
+
+        if (iter % 10 == 1) {       // TODO: change to 10 or whatever
+            int local_live = calculate_number_live_cells(subM, MATRIX_SIZE/m+2, MATRIX_SIZE/n+2);
+            int global_live = 0;
+        
+            MPI_Reduce(&local_live, &global_live, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+        
+            if (rank == 0) {
+                printf("[Iteration %d] Total live cells = %d\n", iter, global_live);
+            }
+        }
 
     }
 
     // Terminates the MPI environment. Must be the last MPI call in the program.
+    free(neighbours);
+    free(subM);
     MPI_Finalize();
 }

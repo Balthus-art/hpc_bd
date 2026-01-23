@@ -33,7 +33,7 @@ APP=$1
 
 # compile the application  
 echo "compiling application: $APP"
-mpicc -O2 -o $APP  $APP.c
+mpicc -O2 -o $APP  $APP.c ghost_exchange_neighbours.c
 
 # Defines the application to execute (path to the executable)
 APP=$1
