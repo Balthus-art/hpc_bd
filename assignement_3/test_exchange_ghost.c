@@ -12,6 +12,7 @@
 
 int *get_nbours(int pid, int m, int n);
 void exchange_ghost_cells(int *matrix, int num_rows, int num_cols, int *neighbours);
+int calculate_number_live_cells(int *matrix, int num_rows, int num_cols);
 
 void print_matrix(int *matrix, int rows, int cols, int rank, const char *label) {
   printf("\n[Rank %d] %s:\n", rank, label);
@@ -65,7 +66,7 @@ int main(int argc, char *argv[]) {
   neighbours = get_nbours(rank, m, n);
 
   // Print initial state
-  print_matrix(matrix, matrix_rows, matrix_cols, rank, "Initial matrix");
+  // print_matrix(matrix, matrix_rows, matrix_cols, rank, "Initial matrix");
 
   // Exchange ghost cells
   printf("[Rank %d] Exchanging ghost cells...\n", rank);
@@ -74,16 +75,24 @@ int main(int argc, char *argv[]) {
   // Print final state
   print_matrix(matrix, matrix_rows, matrix_cols, rank, "Final matrix (after ghost exchange)");
 
+  // Aggregate and print total number of live cells across all processes
+  int local_live = calculate_number_live_cells(matrix, matrix_rows, matrix_cols);
+  int global_live = 0;
+
+  MPI_Reduce(&local_live, &global_live, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+
   // Synchronize before printing summary
   MPI_Barrier(MPI_COMM_WORLD);
 
   if (rank == 0) {
     printf("\n=== Exchange completed ===\n");
-    printf("Grid layout: 2x2 (4 processes)\n");
-    printf("Process layout:\n");
-    printf("  [0] [1]\n");
-    printf("  [2] [3]\n");
-    printf("Each process had a 4x4 matrix with 2x2 data cells + ghost cells on borders.\n");
+    // printf("Grid layout: 2x2 (4 processes)\n");
+    // printf("Process layout:\n");
+    // printf("  [0] [1]\n");
+    // printf("  [2] [3]\n");
+    // printf("Each process had a 4x4 matrix with 2x2 data cells + ghost cells on borders.\n");
+
+    printf("Total live cells = %d\n", global_live);
   }
 
   free(matrix);

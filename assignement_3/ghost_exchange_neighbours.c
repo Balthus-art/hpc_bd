@@ -141,7 +141,6 @@ void send_bottom_top_columns(int *matrix, int num_rows, int num_cols, int *neigh
   }
 }
 
-
 void exchange_ghost_cells(int *matrix, int num_rows, int num_cols, int *neighbours)
 {
   // Create requests array and counter
@@ -166,4 +165,22 @@ void exchange_ghost_cells(int *matrix, int num_rows, int num_cols, int *neighbou
 
   // 5. Wait for all remaining requests to complete
   MPI_Waitall(r, reqs, MPI_STATUSES_IGNORE);
+}
+
+
+int calculate_number_live_cells(int *matrix, int num_rows, int num_cols)
+{
+  // Returns the number of live cells in the matrix excluding ghost cells
+  int live_cells;
+
+  live_cells = 0;
+  for (int i = 1; i < num_rows - 1; i++) {
+    for (int j = 1; j < num_cols - 1; j++) {
+      if (matrix[i * num_cols + j] == 1) {     TODO
+        live_cells++;
+      }
+    }
+  }
+
+  return live_cells;
 }
