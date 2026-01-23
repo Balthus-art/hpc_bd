@@ -11,16 +11,42 @@
 #include <stdio.h>
 // Includes the standard I/O library for functions like printf.
 #include <stdlib.h>
+// Includes the standard integer types library.
+#include <stdint.h>
 // Includes the standard library for general utilities like memory management.
 #include <string.h>
+// Includes the string library for functions like memset.
+#include <unistd.h>
+
 #define  MASTER		0
-#define MATRIX_SIZE 6
+#define MATRIX_SIZE 10
+
+int update(int subM[MATRIX_SIZE/2][MATRIX_SIZE], int row, int col){
+    int i, j, nsum = 0, temp[row][col]= {};
+    for (i = 0; i < row-2; i++)
+    {
+        for (j = 0; j < col-2; j++)
+        {
+            nsum = subM[i][j] + subM[i][j+1] + subM[i][j+2] + subM[i+2][j] +
+                subM[i+2][j+1] + subM[i+2][j+2] + subM[i+1][j] + subM[i+1][j+2];
+            if (subM[i+1][j+1] == 0 && nsum == 3)
+            {
+                temp[i+1][j+1] = 1;
+            }
+            else if (subM[i+1][j+1] == 1 && nsum >= 2 && nsum <= 3)
+            {
+                temp[i+1][j+1] = 1;
+            }
+        }
+    }
+    memcpy(subM, temp, sizeof(int) * row * col);
+}
 
 int main (int argc, char *argv[])
 // Main function for the program. `argc` and `argv` handle command-line arguments.
 {
     // Variables to store the number of ranks, rank, destination, tag, source, m (sub-matrix with contour input of update), newm (sub-matrix without contour output of update) and message count.
-    int i, j, proc, iter, nrank, rank, dest, tag, source, newm, comm, niter=10;
+    int i, j, proc, iter, nrank, rank, niter=10;
 
     // Variables for message passing: `inmsg` is the received message, and `outmsg` is the message to send.
     char inmsg, outmsg='x', outmsg_1MB[1024*2056], inmsg_1MB[1024*2056];
@@ -56,15 +82,18 @@ int main (int argc, char *argv[])
 
     // Logic for task with Master rank.
     if (rank == MASTER) {
-        #define PATTERN_HEIGHT 5
-        #define PATTERN_WIDTH 5
+        #define PATTERN_HEIGHT 8
+        #define PATTERN_WIDTH 8
 
         uint8_t pattern[PATTERN_HEIGHT][PATTERN_WIDTH] = {
-            {0, 1, 2, 3, 4},
-            {0, 1, 2, 3, 4},
-            {0, 1, 2, 3, 4},
-            {0, 1, 2, 3, 4},
-            {0, 1, 2, 3, 4}
+            {0, 1, 0, 0, 0, 0, 0, 0},
+            {0, 0, 1, 0, 0, 0, 0, 0},
+            {1, 1, 1, 0, 0, 0, 0, 0},
+            {0, 0, 0, 0, 0, 0, 0, 0},
+            {0, 0, 0, 0, 0, 0, 0, 0},
+            {0, 0, 0, 0, 0, 0, 0, 0},
+            {0, 0, 0, 0, 0, 0, 0, 0},
+            {0, 0, 0, 0, 0, 0, 0, 0}
         };
 
         int niter, i, j, M[MATRIX_SIZE][MATRIX_SIZE] = {0}; // 2D array
@@ -122,27 +151,28 @@ int main (int argc, char *argv[])
          MPI_COMM_WORLD,
          &Stat);
     }
-
-    MPI_Barrier(MPI_COMM_WORLD); // synchronize all processes before printing
-    // print the chunk assigned to each process
     
-    for (int p = 0; p < nrank; p++) {
-    if (rank == p) {
-        // your existing printf block
-        printf("\n I, proc %d, have received chunk: \n", rank);
-        for (i = 0; i < MATRIX_SIZE/m+2; i++)
+    MPI_Barrier(MPI_COMM_WORLD); // synchronize all processes before printing
+
+    sleep(rank*10);
+    // print the chunk assigned to each process
+    for (iter = 0; iter < niter; iter++)
+    {
+        update(subM, MATRIX_SIZE/2,MATRIX_SIZE);
+
+        for (i = 0; i < MATRIX_SIZE/2; i++)
         {
-            for (j = 0; j < MATRIX_SIZE/n+2; j++)
+            for (j = 0; j < MATRIX_SIZE; j++)
             {
-                printf("%d ", subM[i][j]);
+                if (subM[i][j] == 0)
+                    printf("  ");
+                else
+                    printf("o ");
             }
             printf("\n");
         }
     }
-    MPI_Barrier(MPI_COMM_WORLD); // synchronize before next process prints
-}
-    
-    
+
     // Terminates the MPI environment. Must be the last MPI call in the program.
     MPI_Finalize();
 }
