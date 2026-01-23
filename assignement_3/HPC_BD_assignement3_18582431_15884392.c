@@ -145,16 +145,21 @@ int main (int argc, char *argv[])
     {
         exchange_ghost_cells(&subM[0][0], MATRIX_SIZE/m+2, MATRIX_SIZE/n+2, neighbours);
 
-        printf("Process %d - Iteration %d - Sub-matrix:\n", rank, iter);
-        for (i = 0; i < MATRIX_SIZE/m+2; i++)
-        {
-            for (j = 0; j < MATRIX_SIZE/n+2; j++)
+        if (rank == 0) {
+            printf("Process %d - Iteration %d - Sub-matrix:\n", rank, iter);
+            for (i = 0; i < MATRIX_SIZE/m+2; i++)
             {
-                printf("%d ", subM[i][j]);
+                for (j = 0; j < MATRIX_SIZE/n+2; j++)
+                {
+                    printf("%d ", subM[i][j]);
+                }
+                printf("\n");
             }
-            printf("\n");
+            fflush(stdout);
         }
 
+        MPI_Barrier(MPI_COMM_WORLD);
+        
         //update sub-matrix
         int temp[MATRIX_SIZE/m+2][MATRIX_SIZE/n+2]= {};
         int cols = MATRIX_SIZE/n+2;
@@ -177,7 +182,7 @@ int main (int argc, char *argv[])
         }
         memcpy(subM, temp, sizeof(int) * (MATRIX_SIZE/m + 2) * (MATRIX_SIZE/n + 2));
 
-        if (iter % 10 == 1) {       // TODO: change to 10 or whatever
+        // if (iter % 10 == ) {       // TODO: change to 10 or whatever
             int local_live = calculate_number_live_cells(&subM[0][0], MATRIX_SIZE/m+2, MATRIX_SIZE/n+2);
             int global_live = 0;
         
@@ -186,7 +191,7 @@ int main (int argc, char *argv[])
             if (rank == 0) {
                 printf("[Iteration %d] Total live cells = %d\n", iter, global_live);
             }
-        }
+        // }
 
     }
 
