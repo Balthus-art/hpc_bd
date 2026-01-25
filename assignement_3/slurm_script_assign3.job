@@ -8,7 +8,7 @@
 #SBATCH -N 2
 
 # Allocates 2 tasks (processes) per node
-#SBATCH --ntasks-per-node=2
+#SBATCH --ntasks-per-node=64
 
 # Sources the system-wide bash configuration file
 . /etc/bashrc
@@ -28,6 +28,12 @@ if [[ "$1" == "clean" ]]; then
     exit 0  # Exit after cleanup if only cleanup is requested
 fi
 
+# Check if the application argument is provided
+if [ -z "$1" ]; then
+  echo "Error: No application provided. Usage: $0 <application_path>"
+  exit 1
+fi
+
 # Defines the application to execute (path to the executable)
 APP=$1
 
@@ -35,34 +41,25 @@ APP=$1
 echo "compiling application: $APP"
 mpicc -O2 -o $APP  $APP.c ghost_exchange_neighbours.c
 
-# Defines the application to execute (path to the executable)
-APP=$1
-
-# Check if the application argument is provided
-if [ -z "$1" ]; then
-  echo "Error: No application provided. Usage: $0 <application_path>"
-  exit 1
-fi
-
 # Sets arguments for the application (currently empty)
 ARGS=""
-
-# Optional OpenMPI options (commented out here); the example disables `usnic` transport
-#OMPI_OPTS="--mca btl ^usnic"
 
 # Defines the MPI run command to use for launching the application
 MPI_RUN=mpirun
 
-# Prints the MPI run command for verification
-echo $MPI_RUN
-
 # Prints the application being run for verification
 echo "Running application: $APP"
+
+export OMP_NUM_THREADS=1
 
 # Print the resources allocated- debuggin purpose - try to check if SLURM env variable are set
 echo "Allocated tasks: $SLURM_NTASKS"
 echo "Tasks per node: $SLURM_NTASKS_PER_NODE"
 
 # Executes the application using the MPI run command with specified options and arguments
-$MPI_RUN -np 4 $OMPI_OPTS ./$APP $ARGS
-
+echo
+for ((ncores=1; ncores<=4; ncores*=2)); do  # TODO update loop
+echo "CPUS: " $ncores
+  srun --cpu-bind=cores -n $ncores ./$APP $ARGS
+echo "DONE "
+done

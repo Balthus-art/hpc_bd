@@ -20,7 +20,7 @@
 
 #define  MASTER		0
 #define MATRIX_SIZE 3000
-#define niter 100
+#define niter 100   // TODO: change to 5000
 
 int *get_nbours(int pid, int m, int n);
 void exchange_ghost_cells(int *matrix, int num_rows, int num_cols, int *neighbours);
@@ -32,16 +32,14 @@ int main (int argc, char *argv[])
     // Variables to store the number of ranks, rank, destination, tag, source, m (sub-matrix with contour input of update), newm (sub-matrix without contour output of update) and message count.
     int i, j, proc, iter, nrank, rank;
 
-    // Variables for message passing: `inmsg` is the received message, and `outmsg` is the message to send.
-    char inmsg, outmsg='x', outmsg_1MB[1024*2056], inmsg_1MB[1024*2056];
-       // Initialize the 1MB message (or 1 character for initial test)
-    memset(outmsg_1MB, 'x', sizeof(outmsg_1MB));
-
     // Structure to hold information about the status of an MPI operation.
     MPI_Status Stat;
 
     // Initializes the MPI environment. Must be called before any other MPI functions.
     MPI_Init(&argc,&argv);
+
+    // Start timing
+    double start = MPI_Wtime();
 
     // Determines the total number of processes (tasks) in the MPI communicator `MPI_COMM_WORLD`.
     MPI_Comm_size(MPI_COMM_WORLD, &nrank);
@@ -51,15 +49,20 @@ int main (int argc, char *argv[])
 
     // find/update m, n such that processes are given "the most square sub-matrix possible" to work with
     // guaranteeing to minimize communication overhead
-    int n = nrank;
-    int m = 1;
-    while (m < n) {
-        m *= 2;
-        n /= 2;
+    int dims[2] = {0, 0};
+    MPI_Dims_create(nrank, 2, dims);
+
+    int m = dims[0];   // rows
+    int n = dims[1];   // cols
+
+    if (rank == MASTER) {
+        printf("Rank %d: matrix partitioning in %d rows and %d cols\n", rank, m, n);
     }
 
     // initialize "subM": the local sub-matrix that each process will update
-    int subM[MATRIX_SIZE/m + 2][MATRIX_SIZE/n + 2] = {};
+    int subM_rows = MATRIX_SIZE/m; // number of rows in sub-matrix without ghost cells
+    int subM_cols = MATRIX_SIZE/n; // number of columns in sub-matrix without ghost cells
+    int subM[subM_rows + 2][subM_cols + 2] = {};
 
     // Logic for task with Master rank.
     if (rank == MASTER) {
@@ -103,6 +106,7 @@ int main (int argc, char *argv[])
         };
 
         int i, j, M[MATRIX_SIZE][MATRIX_SIZE] = {0}; // 2D array
+
         // initialize the pattern of our game of life implementation
         // implement the pattern in our initial grid
         for (i = 0; i < PATTERN_HEIGHT; i++) {
@@ -111,25 +115,15 @@ int main (int argc, char *argv[])
             }
         }
 
-        // print initial matrix
-        printf("Initial Matrix M:\n");
-        // for (i = 0; i < MATRIX_SIZE; i++) {
-        //     for (j = 0; j < MATRIX_SIZE; j++) {
-        //         printf("%d ", M[i][j]);
-        //     }
-        //     printf("\n");
-        // }
-
-
         //Send portions of M to every other processes
         for (proc = nrank - 1; proc >= 0; proc--)
         {
             
-            for (i = 0; i < MATRIX_SIZE/m; i++)
+            for (i = 0; i < subM_rows; i++)
             {
-                for (j = 0; j < MATRIX_SIZE/n; j++)
+                for (j = 0; j < subM_cols; j++)
                 {
-                    subM[i+1][j+1] = M[(proc/n)*MATRIX_SIZE/m + i][(proc%n)*MATRIX_SIZE/n + j];
+                    subM[i+1][j+1] = M[(proc/n)*subM_rows + i][(proc%n)*subM_cols + j];
                 }
             }
 
@@ -137,7 +131,7 @@ int main (int argc, char *argv[])
             if (proc != MASTER)
             {
                 MPI_Send(&subM[0][0],
-                        (MATRIX_SIZE/m + 2) * (MATRIX_SIZE/n + 2),
+                        (subM_rows + 2) * (subM_cols + 2),
                         MPI_INT,
                         proc,
                         0,
@@ -146,11 +140,12 @@ int main (int argc, char *argv[])
         }
 
     }
+
     // Logic for task with non-Master ranks.
     else if (rank != MASTER) {
         // Receive sub-matrix from master process
         MPI_Recv(&subM[0][0],
-         (MATRIX_SIZE/m + 2) * (MATRIX_SIZE/n + 2),
+         (subM_rows + 2) * (subM_cols + 2),
          MPI_INT,
          MASTER,
          0,
@@ -158,36 +153,21 @@ int main (int argc, char *argv[])
          &Stat);
     }
     
-    MPI_Barrier(MPI_COMM_WORLD); // synchronize all processes before printing
+    MPI_Barrier(MPI_COMM_WORLD);
 
     int *neighbours = get_nbours(rank, m, n);
 
-    // print the chunk assigned to each process
+    // Run the simulation for niter iterations
     for (iter = 0; iter < niter; iter++)
     {
-        exchange_ghost_cells(&subM[0][0], MATRIX_SIZE/m+2, MATRIX_SIZE/n+2, neighbours);
-
-        // if (rank == 3) {
-        //     printf("Process %d - Iteration %d - Sub-matrix:\n", rank, iter);
-        //     for (i = 1; i < MATRIX_SIZE/m+1; i++)
-        //     {
-        //         for (j = 1; j < MATRIX_SIZE/n+1; j++)
-        //         {
-        //             printf("%d ", subM[i][j]);
-        //         }
-        //         printf("\n");
-        //     }
-        //     fflush(stdout);
-        // }
-
-        // MPI_Barrier(MPI_COMM_WORLD);
+        exchange_ghost_cells(&subM[0][0], subM_rows+2, subM_cols+2, neighbours);
         
         //update sub-matrix
-        int temp[MATRIX_SIZE/m+2][MATRIX_SIZE/n+2]= {};
-        int cols = MATRIX_SIZE/n+2;
-        for (i = 0; i < MATRIX_SIZE/m; i++)
+        int temp[subM_rows+2][subM_cols+2]= {};
+        int cols = subM_cols+2;
+        for (i = 0; i < subM_rows; i++)
         {
-            for (j = 0; j < MATRIX_SIZE/n; j++)
+            for (j = 0; j < subM_cols; j++)
             {
                 int nsum = 0;
                 nsum = subM[i][j] + subM[i][j+1] + subM[i][j+2] + subM[i+2][j] +
@@ -202,10 +182,10 @@ int main (int argc, char *argv[])
                 }
             }
         }
-        memcpy(subM, temp, sizeof(int) * (MATRIX_SIZE/m + 2) * (MATRIX_SIZE/n + 2));
+        memcpy(subM, temp, sizeof(int) * (subM_rows + 2) * (subM_cols + 2));
 
         if ((iter+1) % 10 == 0) {       // TODO: change to 10 or whatever
-            int local_live = calculate_number_live_cells(&subM[0][0], MATRIX_SIZE/m+2, MATRIX_SIZE/n+2);
+            int local_live = calculate_number_live_cells(&subM[0][0], subM_rows+2, subM_cols+2);
             int global_live = 0;
         
             MPI_Reduce(&local_live, &global_live, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
@@ -215,6 +195,12 @@ int main (int argc, char *argv[])
             }
         }
 
+    }
+
+    // Stop timing and print result
+    double end = MPI_Wtime();
+    if (rank == MASTER) {
+        printf("Script finalised after %d iterations after %f seconds\n", niter, end - start);
     }
 
     // Terminates the MPI environment. Must be the last MPI call in the program.
