@@ -57,10 +57,19 @@ int main (int argc, char *argv[])
         printf("Rank %d: matrix partitioning in %d rows and %d cols\n", rank, m, n);
     }
 
+    int *neighbours = get_nbours(rank, m, n);
+
     // initialize "subM": the local sub-matrix that each process will update
     int subM_rows = MATRIX_SIZE/m; // number of rows in sub-matrix without ghost cells
     int subM_cols = MATRIX_SIZE/n; // number of columns in sub-matrix without ghost cells
     int subM[subM_rows + 2][subM_cols + 2] = {};
+
+    // Initialise submatrix counts and displacements for Scatterv and Gatherv
+    int *counts = NULL;
+    int *displacements = NULL;
+
+    counts = malloc(nrank * sizeof(int));
+    displacements = malloc(nrank * sizeof(int));
 
     // Logic for task with Master rank.
     if (rank == MASTER) {
@@ -113,44 +122,28 @@ int main (int argc, char *argv[])
             }
         }
 
-        //Send portions of M to every other processes
-        for (proc = nrank - 1; proc >= 0; proc--)
-        {
-            
-            for (i = 0; i < subM_rows; i++)
-            {
-                for (j = 0; j < subM_cols; j++)
-                {
-                    subM[i+1][j+1] = M[(proc/n)*subM_rows + i][(proc%n)*subM_cols + j];
-                }
-            }
-
-            //Send sub-matrix to each process
-            if (proc != MASTER)
-            {
-                MPI_Send(&subM[0][0],
-                        (subM_rows + 2) * (subM_cols + 2),
-                        MPI_INT,
-                        proc,
-                        0,
-                        MPI_COMM_WORLD);
-            }
+        // Calculate the submatrix sizes and discplacements
+        for (int p = 0; p < nrank; p++) {
+            counts[p] = subM_rows * subM_cols;
+            displs[p] =
+                (p / n) * subM_rows * MATRIX_SIZE +
+                (p % n) * subM_cols;
         }
     }
 
-    // Logic for task with non-Master ranks.
-    else if (rank != MASTER) {
-        // Receive sub-matrix from master process
-        MPI_Recv(&subM[0][0],
-         (subM_rows + 2) * (subM_cols + 2),
-         MPI_INT,
-         MASTER,
-         0,
-         MPI_COMM_WORLD,
-         &Stat);
-    }
+    memset(&subM[0][0], 0, (subM_rows + 2) * (subM_cols + 2) * sizeof(int));
 
-    int *neighbours = get_nbours(rank, m, n);
+    MPI_Scatterv(
+        &M[0][0],          // send buffer (root)
+        counts,            
+        displacements,
+        MPI_INT,
+        &subM[1][1],       // receive interior
+        subM_rows * subM_cols,
+        MPI_INT,
+        MASTER,
+        MPI_COMM_WORLD
+    );
     
     MPI_Barrier(MPI_COMM_WORLD);
     double simulation_start = MPI_Wtime();
@@ -191,11 +184,23 @@ int main (int argc, char *argv[])
 
     }
 
-    // Stop timing and print result
-    double simulation_end = MPI_Wtime();
+    // Stop timing, print result and gather all the sub-matrices to master process
+    double simulation_end = MPI_Wtime(); /// TODO: should do only on master or everywhere ?
     if (rank == MASTER) {
         printf("Script finalised after %d iterations after %f seconds\n", niter, simulation_end - simulation_start);
     }
+
+    MPI_Gatherv(
+        &subM[1][1],    // send only the interrior cells, not ghost cells
+        subM_rows * subM_cols,
+        MPI_INT,
+        (rank == MASTER) ? &M[0][0] : NULL,    // receive buffer (root)
+        counts,
+        displacements,
+        MPI_INT,
+        MASTER,
+        MPI_COMM_WORLD
+    );
 
     // Terminates the MPI environment. Must be the last MPI call in the program.
     free(neighbours);
