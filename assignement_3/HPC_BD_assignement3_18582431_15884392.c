@@ -58,18 +58,18 @@ int main (int argc, char *argv[])
         n /=2;
     };
 
-    int x = MATRIX_SIZE% m;  // number of extra rows to be still allocated
-    int y = MATRIX_SIZE% n;  // number of extra columns to be still allocated
-
     int subM_rows = MATRIX_SIZE/m; // starting number of rows in sub-matrix without ghost cells
     int subM_cols = MATRIX_SIZE/n; // starting number of columns in sub-matrix without ghost cells
+
+    int x = MATRIX_SIZE% m;  // number of extra rows to be still allocated
+    int y = MATRIX_SIZE% n;  // number of extra columns to be still allocated
 
     // values taking 1 if extra row/column needed and 0 otherwise
     int x_sup = (rank / n < x);
     int y_sup = (rank % n < y);
 
     // initialize "subM": the local sub-matrix that each process will update
-    int subM[subM_rows + x_sup+ 2][subM_cols + y_sup + 2];
+    int subM[subM_rows + x_sup + 2][subM_cols + y_sup + 2];
     memset(subM, 0, sizeof(subM));
 
     if (rank == MASTER) {
@@ -160,11 +160,11 @@ int main (int argc, char *argv[])
     {
         exchange_ghost_cells(&subM[0][0], subM_rows+x_sup+2, subM_cols+y_sup+2, neighbours);
         
-        //update sub-matrix
+        //update sub-matrix per Game of Life rules
         int temp[subM_rows+x_sup+2][subM_cols+y_sup+2]= {};
         for (i = 0; i < subM_rows+x_sup; i++)
         {
-            for (j = 0; j < subM_cols+y_sup; j++)
+            for (j = 0; j < subM_cols + y_sup; j++)
             {
                 int nsum = 0;
                 nsum = subM[i][j] + subM[i][j+1] + subM[i][j+2] + subM[i+2][j] +
@@ -175,7 +175,7 @@ int main (int argc, char *argv[])
                 }
             }
         }
-        memcpy(subM, temp, sizeof(int) * (subM_rows + x_sup+2) * (subM_cols + y_sup+2));
+        memcpy(subM, temp, sizeof(int) * (subM_rows + x_sup + 2) * (subM_cols + y_sup+2));
 
         if ((iter+1) % 10 == 0) {       // TODO: change to 10 or whatever
             int local_live = calculate_number_live_cells(&subM[0][0], subM_rows+x_sup+2, subM_cols+y_sup+2);
@@ -208,21 +208,14 @@ int main (int argc, char *argv[])
         // Master process gathers sub-matrices from all processes
         for (proc = 0; proc < nrank; proc++)
         {
-            int x_sup=0, y_sup=0;
-            if (proc/n < x) // check if extra row needed
-            {
-                x_sup = 1;
-            }
-            if (proc%n < y) // check if extra column needed
-            {
-                y_sup = 1;
-            }
+            int x_sup = (proc / n < x);
+            int y_sup = (proc % n < y);
 
             if (proc == MASTER) {
                 // Copy its own sub-matrix into the correct position in M
-                for (i = 0; i < subM_rows+ x_sup; i++)
+                for (i = 0; i < subM_rows + x_sup; i++)
                 {
-                    for (j = 0; j < subM_cols+ y_sup; j++)
+                    for (j = 0; j < subM_cols + y_sup; j++)
                     {           
                         M[i][j] = subM[i+1][j+1];
                     }
@@ -242,9 +235,9 @@ int main (int argc, char *argv[])
                 }
                 
                 // Copy received sub-matrix into the correct position in M
-                for (i = 0; i < subM_rows; i++)
+                for (i = 0; i < subM_rows + x_sup; i++)
                 {
-                    for (j = 0; j < subM_cols; j++)
+                    for (j = 0; j < subM_cols + y_sup; j++)
                     {           
                         M[(proc/n)*subM_rows + min(proc/n, x) + i][(proc%n)*subM_cols + min(proc%n, y) + j] = subM[i+1][j+1];
                     }
@@ -264,6 +257,8 @@ int main (int argc, char *argv[])
 
     else {
         // Non-master processes send their final sub-matrix back to the master process
+        int x_sup = (rank / n < x);
+        int y_sup = (rank % n < y);
         int MPI_Send_final_subM = MPI_Send(
             &subM[0][0],
             (subM_rows + x_sup + 2) * (subM_cols + y_sup + 2),
