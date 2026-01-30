@@ -4,7 +4,7 @@
 *   This is our implementation of Conway's Game of Life over a 3000x3000 grid distributed
 *   across multiple processes using MPI for parallel processing.
 * AUTHOR: Balthazar Dupuy d'Angeac 18582431 & Anezka Potesilova 15884392
-* LAST REVISED: 28/01/26
+* LAST REVISED: 30/01/26
 ******************************************************************************/
 
 #include "mpi.h"
@@ -20,7 +20,7 @@
 #include <unistd.h>
 
 #define MASTER	0
-#define MATRIX_SIZE 9  // TODO: change to 3000
+#define MATRIX_SIZE 12 // TODO: change to 3000
 #define niter 2    // TODO: change to 5000
 #define min(a,b) ((a) < (b) ? (a) : (b)) // Macro to find the minimum of two values.
 
@@ -106,31 +106,33 @@ int main (int argc, char *argv[])
             int x_sup = (proc / n < x);
             int y_sup = (proc % n < y);
 
-            int subM[subM_rows + x_sup + 2][subM_cols + y_sup + 2] = {};
-            for (i = 0; i < subM_rows + x_sup; i++)
+            // Fill the master’s existing subM instead of redeclaring it
+            if (proc == MASTER) {
+                for (i = 0; i < subM_rows + x_sup; i++)
                 {
                     for (j = 0; j < subM_cols + y_sup; j++)
                     {
-                        // copy portion of M into subM for this process
                         subM[i+1][j+1] = M[(proc/n)*subM_rows + i + min(proc / n, x)][(proc%n)*subM_cols + j + min(proc % n , y)];
                     }
                 }
-        
-
-            //Send sub-matrix to each process
-            if (proc != MASTER)
-            {
-                int MPI_send_initial_subM = MPI_Send(&subM[0][0],
+            } else {
+                // fill a temporary subM to send
+                int tempSubM[subM_rows + x_sup + 2][subM_cols + y_sup + 2] = {};
+                for (i = 0; i < subM_rows + x_sup; i++)
+                {
+                    for (j = 0; j < subM_cols + y_sup; j++)
+                    {
+                        tempSubM[i+1][j+1] = M[(proc/n)*subM_rows + i + min(proc / n, x)][(proc%n)*subM_cols + j + min(proc % n , y)];
+                    }
+                }
+                MPI_Send(&tempSubM[0][0],
                         (subM_rows + x_sup + 2) * (subM_cols + y_sup + 2),
                         MPI_INT,
                         proc,
                         0,
                         MPI_COMM_WORLD);
-                // abort if error in sending
-                if (MPI_send_initial_subM != MPI_SUCCESS) {
-                    MPI_Abort(MPI_COMM_WORLD, MPI_send_initial_subM);
-                }
             }
+
         }
     }
 
@@ -162,6 +164,18 @@ int main (int argc, char *argv[])
         
         //update sub-matrix per Game of Life rules
         int temp[subM_rows+x_sup+2][subM_cols+y_sup+2]= {};
+        // Print subM for this process after each iteration with a small delay
+        usleep(rank * 100000); // stagger output by 0.1s per rank
+        printf("Rank %d - Iteration %d Submatrix:\n", rank, iter+1);
+        for (i = 0; i < subM_rows + x_sup + 2; i++) {
+            for (j = 0; j < subM_cols + y_sup + 2; j++) {
+                printf("%d ", subM[i][j]);
+            }
+            printf("\n");
+        }
+        printf("\n");
+        fflush(stdout); // ensure output is flushed immediately
+
         for (i = 0; i < subM_rows+x_sup; i++)
         {
             for (j = 0; j < subM_cols + y_sup; j++)
